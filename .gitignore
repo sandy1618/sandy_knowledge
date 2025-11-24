@@ -1,0 +1,16 @@
+# Obsidian workspace (changes frequently with tab switching)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# Obsidian cache and temporary files
+.obsidian/cache/
+
+# Obsidian trash folder
+.trash/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
