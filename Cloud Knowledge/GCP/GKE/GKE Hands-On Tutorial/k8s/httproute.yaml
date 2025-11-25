@@ -1,0 +1,41 @@
+# HTTPRoute - Routing rules for the Gateway
+# Defines how HTTP traffic should be routed to backend services
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: demo-app-route
+  namespace: demo-app
+  labels:
+    app: demo-app
+spec:
+  # Attach this route to the gateway
+  parentRefs:
+  - name: demo-gateway
+    namespace: demo-app
+
+  # Routing rules
+  rules:
+  # Rule 1: Route all traffic to demo-app service
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: demo-app
+      port: 80
+      weight: 100
+
+  # Additional rules can be added for advanced routing:
+  # - Path-based routing: /api -> api-service, /web -> web-service
+  # - Header-based routing
+  # - Query parameter-based routing
+  # - Traffic splitting for canary deployments
+
+  # Example: Path-based routing (commented out)
+  # - matches:
+  #   - path:
+  #       type: PathPrefix
+  #       value: /api
+  #   backendRefs:
+  #   - name: api-service
+  #     port: 80

@@ -1,0 +1,28 @@
+# GKE Gateway API - External HTTP(S) Load Balancer
+# This creates a Google Cloud Load Balancer with a public IP address
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: demo-gateway
+  namespace: demo-app
+  labels:
+    app: demo-app
+spec:
+  # GatewayClass defines the type of load balancer
+  # gke-l7-global-external-managed: Global external Application Load Balancer
+  # Other options: gke-l7-regional-external-managed, gke-l7-gxlb
+  gatewayClassName: gke-l7-global-external-managed
+
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    # Allow routes from the same namespace
+    allowedRoutes:
+      namespaces:
+        from: Same
+
+  # Addresses section can be used to specify a static IP
+  # addresses:
+  # - type: NamedAddress
+  #   value: demo-app-ip

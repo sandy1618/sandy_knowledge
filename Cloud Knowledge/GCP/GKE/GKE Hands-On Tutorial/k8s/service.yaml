@@ -1,0 +1,22 @@
+# Kubernetes Service for the demo application
+# Provides stable internal networking endpoint for the pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app
+  namespace: demo-app
+  labels:
+    app: demo-app
+spec:
+  # ClusterIP: internal-only service
+  # The Gateway will route external traffic to this service
+  type: ClusterIP
+  selector:
+    app: demo-app
+  ports:
+  - port: 80
+    targetPort: http
+    protocol: TCP
+    name: http
+  # Session affinity can be enabled if needed
+  # sessionAffinity: ClientIP

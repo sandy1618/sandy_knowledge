@@ -1,0 +1,34 @@
+# Kustomization file - ties all resources together
+# This file defines the order and grouping of resources to deploy
+# Usage: kubectl apply -k ./k8s/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Namespace to apply to all resources
+namespace: demo-app
+
+# Resources to deploy in order
+resources:
+  # 1. Create namespace first
+  - namespace.yaml
+  # 2. Create service account
+  - service-account.yaml
+  # 3. Create the application deployment
+  - deployment.yaml
+  # 4. Create the service
+  - service.yaml
+  # 5. Create the gateway (load balancer)
+  - gateway.yaml
+  # 6. Create routing rules
+  - httproute.yaml
+  # 7. Configure autoscaling
+  - hpa.yaml
+
+# Common labels applied to all resources
+commonLabels:
+  tutorial: gke-hands-on
+  managed-by: kustomize
+
+# Common annotations
+commonAnnotations:
+  description: "GKE Hands-On Tutorial Resources"

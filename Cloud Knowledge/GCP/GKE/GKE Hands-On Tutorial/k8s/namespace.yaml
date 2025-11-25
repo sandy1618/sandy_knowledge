@@ -1,0 +1,9 @@
+# Namespace for the demo application
+# Provides logical isolation for all resources in this tutorial
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-app
+  labels:
+    app: demo-app
+    environment: tutorial
