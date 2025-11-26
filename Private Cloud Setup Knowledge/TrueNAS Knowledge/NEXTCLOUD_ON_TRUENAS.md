@@ -60,13 +60,41 @@
 
 ## Pre-Installation Planning
 
-### Step 1: Create Dedicated Dataset for Nextcloud
+### Step 1: Choose Storage Approach
 
-**Why?** Keeps Nextcloud data organized and allows independent snapshots/backups.
+**Two Options Available**:
+
+#### Option A: Automatic (ixVolume) - Recommended for Most Users ⭐
+
+TrueNAS SCALE 24.x+ automatically manages storage:
+- **No manual dataset creation needed**
+- TrueNAS creates datasets in `.ix-apps` pool automatically
+- Snapshots work with your pool's snapshot schedule
+- Cleaned up automatically if app is deleted
+- Perfect for quick setup
+
+**Skip to Step 2** if using this method!
+
+#### Option B: Manual Datasets (Advanced)
+
+Create dedicated datasets for full control over ZFS properties, quotas, and organization.
+
+**When to use manual datasets**:
+- Need custom ZFS properties per dataset
+- Want specific record sizes for different data types
+- Require per-dataset quotas
+- Integration with existing backup workflows
+- Prefer explicit control over storage layout
+
+---
+
+### Step 1A: Manual Dataset Creation (Optional - Advanced)
+
+**Only follow this if you chose Option B above**
 
 1. **Navigate**: Storage → Pools → tank → "Add Dataset"
 
-2. **Configure**:
+2. **Configure Parent Dataset**:
    ```
    Name: nextcloud
    Dataset Preset: Apps (optimized for containers)
@@ -78,13 +106,115 @@
    ```
 
 3. **Create Subdatasets** (optional but organized):
+   
+   **Important**: These are ZFS datasets, NOT network shares (SMB/NFS)
+   
+   For each subdataset, navigate to Storage → Pools → tank/nextcloud → "Add Dataset":
+   
+   **Subdataset: config**
    ```
-   tank/nextcloud
-   ├─ config   (Nextcloud configuration)
-   ├─ data     (user files)
-   ├─ database (PostgreSQL/MySQL data)
-   └─ html     (Nextcloud web files)
+   Name: config
+   Dataset Type: Generic (filesystem for storing files)
+   
+   Purpose: Nextcloud configuration files
+   ├─ Stores: config.php, app settings
+   ├─ Size: Small (~100MB)
+   └─ Share Type: NONE (internal Docker use only)
+   
+   Settings:
+   ├─ Record Size: 128K (default)
+   ├─ Compression: lz4
+   ├─ Quota: 5 GB (more than enough)
+   └─ Atime: off
    ```
+   
+   **Subdataset: data**
+   ```
+   Name: data
+   Dataset Type: Generic (filesystem for storing files)
+   
+   Purpose: User files (documents, photos, uploads)
+   ├─ Stores: All user-uploaded files
+   ├─ Size: Large (grows with usage)
+   └─ Share Type: NONE (accessed through Nextcloud only)
+   
+   Settings:
+   ├─ Record Size: 1M (optimized for large files)
+   ├─ Compression: lz4
+   ├─ Quota: Unlimited (or set based on available space)
+   └─ Atime: off
+   ```
+   
+   **Subdataset: database**
+   ```
+   Name: database
+   Dataset Type: Generic (filesystem for storing files)
+   
+   Purpose: PostgreSQL/MySQL database files
+   ├─ Stores: Database tables, indexes
+   ├─ Size: Medium (grows with users/files metadata)
+   └─ Share Type: NONE (internal Docker use only)
+   
+   Settings:
+   ├─ Record Size: 16K (optimized for databases)
+   ├─ Compression: lz4 (or zstd for better ratio)
+   ├─ Quota: 50 GB (adjust based on users)
+   ├─ Atime: off
+   └─ Sync: standard (or always for data safety)
+   ```
+   
+   **Subdataset: html**
+   ```
+   Name: html
+   Dataset Type: Generic (filesystem for storing files)
+   
+   Purpose: Nextcloud application files (PHP, JS, CSS)
+   ├─ Stores: Nextcloud web application code
+   ├─ Size: Medium (~5GB)
+   └─ Share Type: NONE (internal Docker use only)
+   
+   Settings:
+   ├─ Record Size: 128K (default)
+   ├─ Compression: lz4
+   ├─ Quota: 20 GB
+   └─ Atime: off
+   ```
+   
+   **Final Structure**:
+   ```
+   tank/nextcloud (parent dataset - Apps preset)
+   ├─ config   → /mnt/tank/nextcloud/config   (Generic, 16K blocks)
+   ├─ data     → /mnt/tank/nextcloud/data     (Generic, 1M blocks)
+   ├─ database → /mnt/tank/nextcloud/database (Generic, 16K blocks)
+   └─ html     → /mnt/tank/nextcloud/html     (Generic, 128K blocks)
+   ```
+   
+   ---
+   
+   ### Understanding Dataset Types
+   
+   **Generic vs Apps vs SMB**:
+   
+   | Type | Purpose | When to Use |
+   |------|---------|-------------|
+   | **Generic** | Standard filesystem for files | Default for most use cases ✓ |
+   | **Apps** | Optimized for containerized apps | Parent dataset for Nextcloud ✓ |
+   | **SMB** | Pre-configured for Windows shares | Only for SMB/CIFS network shares ❌ |
+   
+   **Why NOT SMB for Nextcloud datasets?**
+   - These datasets are accessed by Docker containers, not network clients
+   - SMB adds unnecessary overhead (ACLs, permissions complexity)
+   - Nextcloud manages its own file permissions internally
+   - Using "Generic" gives you maximum flexibility
+   
+   **When to use SMB datasets**:
+   ```
+   ✓ tank/media     → Shared via SMB to Windows/Mac clients
+   ✓ tank/documents → Shared via SMB to network users
+   ✗ tank/nextcloud → NOT shared, used by Docker internally
+   ```
+   
+   ---
 
 ### Step 2: Plan Access Method
 
@@ -144,10 +274,17 @@ Nextcloud Settings:
 ├─ Admin Username: admin
 ├─ Admin Password: [strong password - SAVE THIS!]
 ├─ Admin Email: admin@yourdomain.com
-└─ Nextcloud Host: cloud.home.local (or your domain)
+└─ Nextcloud Host: 192.168.1.10 (your TrueNAS IP)
+   (or cloud.yourdomain.com if you have a domain)
 
 Timezone: America/New_York (or your timezone)
 ```
+
+**Important - Host Field**:
+- Enter your TrueNAS IP address (e.g., `192.168.1.10`)
+- This sets the trusted domain for Nextcloud
+- You can add more domains later in Nextcloud config
+- If using remote access, enter your domain name
 
 #### Database Configuration
 ```
@@ -161,40 +298,112 @@ PostgreSQL Settings:
 └─ Host: localhost (app manages it)
 ```
 
-#### Storage Configuration
-```
-Nextcloud Data Storage:
-├─ Type: Host Path
-├─ Host Path: /mnt/tank/nextcloud/data
-└─ Mount Path: /var/www/html/data
+#### Storage Configuration (Modern TrueCharts Version)
 
-Nextcloud Config Storage:
-├─ Type: Host Path
-├─ Host Path: /mnt/tank/nextcloud/config
-└─ Mount Path: /var/www/html/config
+**TrueNAS SCALE 24.x+ with TrueCharts uses ixVolume (automatic management)**:
 
-PostgreSQL Data Storage:
-├─ Type: Host Path
-├─ Host Path: /mnt/tank/nextcloud/database
-└─ Mount Path: /var/lib/postgresql/data
+```
+Storage Configuration Section:
+
+1. Nextcloud AppData Storage (HTML, Custom Themes, Apps)
+   ├─ Type: ixVolume (Dataset created automatically by the system)
+   ├─ Enable ACL: ☐ Unchecked (not needed for containers)
+   └─ Auto-managed at: /mnt/.ix-apps/[app-name]/app/html
+
+2. Nextcloud User Data Storage
+   ├─ Type: ixVolume (Dataset created automatically by the system)
+   ├─ Enable ACL: ☐ Unchecked
+   └─ Auto-managed at: /mnt/.ix-apps/[app-name]/user-data
+
+3. Nextcloud Postgres Data Storage
+   ├─ Type: ixVolume (Dataset created automatically by the system)
+   ├─ Enable ACL: ☐ Unchecked
+   └─ Auto-managed at: /mnt/.ix-apps/[app-name]/postgres-data
 ```
 
-#### Network Configuration
+**What is ixVolume?**
+- TrueNAS automatically creates and manages ZFS datasets
+- Stored in special `.ix-apps` dataset on your pool
+- No manual dataset creation needed
+- Automatic cleanup when app is deleted
+- Snapshots work automatically with your pool
+
+**Alternative: Manual Host Path (Advanced Users)**
+
+If you prefer manual control (click dropdown to change from ixVolume):
+
 ```
-Networking:
-├─ Service Type: NodePort (or LoadBalancer if available)
-├─ HTTP Port: 9001 (external port to access Nextcloud)
-├─ HTTPS Port: 9443 (if SSL enabled)
-└─ Certificate: (add later for SSL)
+1. Nextcloud AppData Storage:
+   ├─ Type: Host Path
+   ├─ Host Path: /mnt/tank/nextcloud/html
+   └─ Read Only: ☐ Unchecked
+
+2. Nextcloud User Data Storage:
+   ├─ Type: Host Path
+   ├─ Host Path: /mnt/tank/nextcloud/data
+   └─ Read Only: ☐ Unchecked
+
+3. Nextcloud Postgres Data Storage:
+   ├─ Type: Host Path
+   ├─ Host Path: /mnt/tank/nextcloud/database
+   └─ Read Only: ☐ Unchecked
+```
+
+**Recommendation**: Use **ixVolume** (default) unless you need:
+- Custom dataset layouts
+- Specific ZFS properties per dataset
+- Integration with existing datasets
+- Manual backup workflows
+
+#### Networking Configuration
+
+**Modern TrueCharts versions use simplified networking**:
+
+```
+Network Configuration:
+├─ Web Port: 10000 (or auto-assigned by TrueNAS)
+└─ Access via: http://192.168.1.10:10000
+
+Certificate Configuration:
+└─ Add certificate later for HTTPS (optional)
+```
+
+**Port Assignment**:
+- TrueNAS automatically assigns an available port
+- Default range: 9000-9999 or 10000+
+- Note the assigned port after installation
+- Access: `http://[truenas-ip]:[assigned-port]`
+
+#### Ingress (Optional - Advanced)
+```
+For domain-based access (e.g., cloud.home.local):
+├─ Enable Ingress: ☐ (advanced feature)
+├─ Hostname: cloud.home.local
+└─ Certificate: Select or create cert
 ```
 
 #### Resource Limits (Recommended)
 ```
-Resources:
+Resources Section:
+├─ Enable Resource Limits: ☑ Checked
 ├─ CPU Limit: 2000m (2 cores)
-├─ Memory Limit: 4Gi (4GB)
-├─ CPU Request: 500m
-└─ Memory Request: 2Gi
+├─ Memory Limit: 4Gi (4GB RAM)
+└─ GPU: Not required for Nextcloud
+
+Note: Limits prevent Nextcloud from consuming all server resources
+```
+
+#### Additional Storage (Optional)
+
+For mounting external TrueNAS shares directly:
+
+```
+Additional Storage:
+├─ Click "Add" to mount existing datasets
+├─ Type: Host Path
+├─ Host Path: /mnt/tank/media
+├─ Mount Path: /media (inside container)
+└─ Read Only: ☐ or ☑ (as needed)
 ```
 
 ### Step 6: Install and Wait
@@ -211,9 +420,26 @@ Resources:
 
 ### Step 7: Access Nextcloud
 
-1. **Get URL**: Apps → nextcloud → "Web Portal"
+1. **Find Access URL**:
+   
+   **Method 1**: Click "Open" button in TrueNAS Apps page
    ```
-   URL: http://192.168.1.10:9001
+   Apps → Installed Applications → nextcloud → "Open" button
+   ```
+   
+   **Method 2**: Check assigned port
+   ```
+   Apps → nextcloud → Click app name → "Application Info"
+   Look for: Web Port: [assigned-port]
+   Access: http://192.168.1.10:[assigned-port]
+   ```
+   
+   **Typical URLs**:
+   ```
+   http://192.168.1.10:10000
+   or
+   http://192.168.1.10:9000
+   (port varies based on auto-assignment)
    ```
 
 2. **First Login**:
@@ -221,13 +447,46 @@ Resources:
    Username: admin
    Password: [password you set during install]
    ```
+   
+   **If you see "Setup" screen instead**:
+   - Some versions require initial setup in web UI
+   - Create admin account
+   - Select PostgreSQL database
+   - Database host: `nextcloud-db:5432`
+   - Enter database credentials from install
 
 3. **Welcome Wizard**:
    - Install recommended apps: ✓
    - Click "Install"
-   - Wait for apps to install
+   - Wait for apps to install (2-5 minutes)
+
+4. **Initial Warnings** (Normal):
+   ```
+   You may see warnings about:
+   ⚠️  PHP OPcache not configured
+   ⚠️  Database missing indexes
+   ⚠️  Default phone region not set
+   
+   Fix these in Step 12 (Initial Configuration)
+   ```
 
 **Success!** Nextcloud is now running.
+
+**Troubleshooting Access Issues**:
+```
+1. Can't connect?
+   - Check app status is "Active" (green)
+   - Verify firewall isn't blocking port
+   - Try from TrueNAS Shell: curl http://localhost:[port]
+
+2. Shows "Access through untrusted domain"?
+   - See Step 14 (Configure Trusted Domains)
+
+3. Port not responding?
+   - Wait 5 minutes after install completes
+   - Containers may still be initializing
+   - Check logs: Apps → nextcloud → Logs
+```
 
 ---
 
