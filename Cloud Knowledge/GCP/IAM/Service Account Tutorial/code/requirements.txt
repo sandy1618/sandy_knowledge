@@ -1,0 +1,6 @@
+# Google Cloud Storage client library
+google-cloud-storage>=2.10.0
+
+# Optional: For more advanced GCS operations
+# google-auth>=2.22.0
+# google-auth-httplib2>=0.1.0
