@@ -389,6 +389,223 @@ Pool (tank)                    ← Top-level storage container
 └─ Zvol (vm-disk)             ← Block device (for VMs)
 ```
 
+### Understanding RAID (Redundant Array of Independent Disks)
+
+**RAID Full Form**: **R**edundant **A**rray of **I**ndependent **D**isks (originally "Inexpensive" Disks)
+
+**What is RAID?**
+RAID is a technology that combines multiple physical hard drives into a single logical unit to achieve:
+- **Redundancy**: Data survives drive failures
+- **Performance**: Faster read/write speeds
+- **Capacity**: Larger storage pools
+
+---
+
+### Complete RAID Levels Guide
+
+#### RAID 0 - Striping (No Redundancy)
+```
+Diagram:
+┌─────────┬─────────┐
+│ Drive 1 │ Drive 2 │
+├─────────┼─────────┤
+│ Block A1│ Block A2│
+│ Block B1│ Block B2│
+│ Block C1│ Block C2│
+└─────────┴─────────┘
+
+How it works: Data split across all drives
+├─ File "A" → A1 on Drive 1, A2 on Drive 2
+├─ File "B" → B1 on Drive 1, B2 on Drive 2
+└─ Both drives work simultaneously
+
+Capacity: 100% (2x 4TB = 8TB usable)
+Protection: NONE - any drive fails = all data lost ❌
+Speed: ⭐⭐⭐ (fastest, reads/writes to all drives)
+Use Case: Video editing scratch disk, temp files
+Verdict: NEVER for important data!
+```
+
+---
+
+#### RAID 1 - Mirroring
+```
+Diagram:
+┌─────────┬─────────┐
+│ Drive 1 │ Drive 2 │
+├─────────┼─────────┤
+│ Block A │ Block A │ ← Same data
+│ Block B │ Block B │ ← Same data
+│ Block C │ Block C │ ← Same data
+└─────────┴─────────┘
+
+How it works: Complete copy on each drive
+├─ File "A" → Written to BOTH drives identically
+├─ File "B" → Written to BOTH drives identically
+└─ Perfect clones of each other
+
+Capacity: 50% (2x 4TB = 4TB usable)
+Protection: 1 drive can fail ✓
+Speed: ⭐⭐ (reads fast, writes moderate)
+Use Case: Boot drives, critical data
+Verdict: Simple, reliable, expensive per GB
+```
+
+---
+
+#### RAID 5 - Striping with Parity (Minimum 3 drives)
+```
+Diagram (3 drives):
+┌─────────┬─────────┬─────────┐
+│ Drive 1 │ Drive 2 │ Drive 3 │
+├─────────┼─────────┼─────────┤
+│ Block A1│ Block A2│ Parity A│ ← Row 1
+│ Block B1│ Parity B│ Block B2│ ← Row 2
+│ Parity C│ Block C1│ Block C2│ ← Row 3
+└─────────┴─────────┴─────────┘
+
+How it works: Data + rotating parity
+├─ File "A" → A1, A2 on data drives, Parity on Drive 3
+├─ Parity rotates across all drives
+└─ Can rebuild any drive using other 2
+
+Capacity: (N-1)/N drives (3x 4TB = 8TB usable = 67%)
+Protection: 1 drive can fail ✓
+Speed: ⭐⭐ (reads good, writes slower due to parity calc)
+Use Case: File servers, general storage
+Warning: Deprecated - use RAID-Z1 (ZFS) instead
+Problem: Drive rebuild can take DAYS, high risk of 2nd failure
+```
+
+---
+
+#### RAID 6 - Dual Parity (Minimum 4 drives)
+```
+Diagram (4 drives):
+┌─────────┬─────────┬─────────┬─────────┐
+│ Drive 1 │ Drive 2 │ Drive 3 │ Drive 4 │
+├─────────┼─────────┼─────────┼─────────┤
+│ Block A1│ Block A2│ Parity A│ Parity A'│ ← 2 parities
+│ Block B1│ Parity B│ Block B2│ Parity B'│
+│ Parity C│ Block C1│ Block C2│ Parity C'│
+└─────────┴─────────┴─────────┴─────────┘
+
+How it works: 2 parity blocks per stripe
+├─ Like RAID 5, but with 2 parity calculations
+└─ Can lose ANY 2 drives and rebuild
+
+Capacity: (N-2)/N drives (4x 4TB = 8TB usable = 50%)
+Protection: 2 drives can fail ✓✓
+Speed: ⭐ (reads OK, writes slow - more parity)
+Use Case: Important data, large arrays
+Verdict: Good for enterprise, but ZFS RAID-Z2 better
+```
+
+---
+
+#### RAID 10 (1+0) - Mirrored Stripe ⭐ Why it's called RAID 10
+```
+Diagram (4 drives):
+        RAID 0 (Stripe)
+              ↓
+    ┌─────────┴─────────┐
+    │                   │
+RAID 1        RAID 1
+Mirror        Mirror
+    │             │
+┌───┴───┐     ┌───┴───┐
+│       │     │       │
+Drive1  Drive2 Drive3 Drive4
+  A      A      B      B
+  C      C      D      D
+  E      E      F      F
+
+How it works: First MIRROR (1), then STRIPE (0)
+Step 1: Create 2 mirrors
+├─ Mirror 1: Drive 1 ↔ Drive 2 (contains A, C, E)
+└─ Mirror 2: Drive 3 ↔ Drive 4 (contains B, D, F)
+
+Step 2: Stripe across mirrors
+├─ File "A" → Goes to Mirror 1 (written to both drives)
+├─ File "B" → Goes to Mirror 2 (written to both drives)
+└─ Files alternate between mirror pairs
+
+Why "10"?
+├─ "1" = RAID 1 (mirroring within pairs)
+├─ "0" = RAID 0 (striping across pairs)
+└─ Combined = "10" = Mirror first, then stripe
+
+Capacity: 50% (4x 4TB = 8TB usable)
+Protection: 1 drive per mirror can fail
+├─ Can lose Drive1 OR Drive2 (not both) ✓
+├─ Can lose Drive3 OR Drive4 (not both) ✓
+├─ Can lose Drive1 AND Drive3 (different mirrors) ✓✓
+└─ Cannot lose Drive1 AND Drive2 (same mirror) ❌
+
+Speed: ⭐⭐⭐ (fastest redundant config)
+├─ Reads: 4 drives working in parallel
+└─ Writes: 2 mirror pairs writing simultaneously
+
+Use Case: 
+├─ Databases (SQL, PostgreSQL, MySQL)
+├─ Virtual machine storage
+├─ Any high-performance + redundancy need
+└─ Enterprise servers
+
+Verdict: Best performance with redundancy, but expensive (50% capacity)
+```
+
+**RAID 10 vs RAID 01 (rare)**:
+```
+RAID 10: Mirror → Stripe (better)
+RAID 01: Stripe → Mirror (worse, less fault tolerant)
+```
+
+---
+
+#### ZFS RAID-Z1, Z2, Z3 (Modern Alternative)
+
+**Why ZFS is Better than Traditional RAID**:
+- Self-healing: Detects and repairs corruption automatically
+- Snapshots: Instant backups
+- No write-hole: Traditional RAID 5/6 can corrupt on power loss
+- Flexible: Can use different size drives (not recommended, but works)
+
+```
+RAID-Z1 = Like RAID 5, but better
+├─ Minimum: 3 drives (2 data + 1 parity)
+├─ 4 drives: 75% usable (3 data + 1 parity)
+└─ Protection: 1 drive failure
+
+RAID-Z2 = Like RAID 6, but better  
+├─ Minimum: 4 drives (2 data + 2 parity)
+├─ 4 drives: 50% usable
+├─ 6 drives: 67% usable
+└─ Protection: 2 drive failures
+
+RAID-Z3 = No traditional equivalent
+├─ Minimum: 5 drives (2 data + 3 parity)
+├─ 6 drives: 50% usable
+└─ Protection: 3 drive failures (overkill for most)
+```
+
+---
+
+### RAID Comparison Table
+
+| RAID | Min Drives | Capacity Formula | Usable (4TB drives) | Failures | Speed | Traditional Use |
+|------|------------|------------------|---------------------|----------|-------|-----------------|
+| **0** | 2 | 100% | 16TB (4x) | 0 ❌ | ⭐⭐⭐ | Never for data |
+| **1** | 2 | 50% | 4TB (2x) | 1 ✓ | ⭐⭐ | Boot drives |
+| **5** | 3 | (N-1)/N | 8TB (3x) | 1 ✓ | ⭐⭐ | Deprecated |
+| **6** | 4 | (N-2)/N | 8TB (4x) | 2 ✓✓ | ⭐ | Large arrays |
+| **10** | 4 | 50% | 8TB (4x) | 1 per mirror | ⭐⭐⭐ | Performance |
+| **Z1** | 3 | (N-1)/N | 12TB (4x) | 1 ✓ | ⭐⭐ | Home NAS ⭐ |
+| **Z2** | 4 | (N-2)/N | 8TB (4x) | 2 ✓✓ | ⭐⭐ | Important data |
+| **Z3** | 5 | (N-3)/N | 12TB (6x) | 3 ✓✓✓ | ⭐ | Mission critical |
+
+---
+
 ### Step 12: Create Storage Pool
 
 1. **Navigate**: Storage → Pools → "Create Pool"
@@ -400,7 +617,166 @@ Pool (tank)                    ← Top-level storage container
 
 3. **Select Layout**:
    
-   **For 4 drives (example)**:
+   **Understanding Storage Efficiency**:
+   "Usable" percentage refers to how much actual storage you get after accounting for redundancy/parity data.
+   
+   ### Example 1: 2 Drives (2x 4TB = 8TB Raw)
+   
+   **Option A: Stripe (RAID-0)**
+   ```
+   Configuration: Both drives combined, no redundancy
+   ├─ Drive 1: 4TB
+   ├─ Drive 2: 4TB
+   ├─ Total Raw: 8TB
+   ├─ Usable Storage: 8TB (100%)
+   ├─ Protection: NONE - any drive failure = TOTAL DATA LOSS ❌
+   └─ Use Case: NEVER use this for important data!
+   ```
+   
+   **Option B: Mirror (RAID-1)** ⭐ Recommended for 2 drives
+   ```
+   Configuration: Complete copy on each drive
+   ├─ Drive 1: 4TB (copy of all data)
+   ├─ Drive 2: 4TB (copy of all data)
+   ├─ Total Raw: 8TB
+   ├─ Usable Storage: 4TB (50%)
+   ├─ Protection: 1 drive can fail, data still safe ✓
+   ├─ Read Speed: Fast (can read from both drives)
+   └─ Write Speed: Moderate (must write to both)
+   
+   Math: 8TB raw ÷ 2 copies = 4TB usable
+   ```
+   
+   ---
+   
+   ### Example 2: 4 Drives (4x 4TB = 16TB Raw)
+   
+   **Option A: Stripe (RAID-0)**
+   ```
+   Configuration: All drives combined, no safety
+   ├─ Total Raw: 16TB
+   ├─ Usable Storage: 16TB (100%)
+   ├─ Protection: NONE - losing ANY drive = lose EVERYTHING ❌
+   └─ Verdict: NEVER use for home NAS!
+   ```
+   
+   **Option B: 2x Mirror (RAID-10)** ⭐ Best for speed
+   ```
+   Configuration: 2 pairs of mirrored drives
+   ├─ Pair 1: Drive 1 + Drive 2 (mirrored)
+   ├─ Pair 2: Drive 3 + Drive 4 (mirrored)
+   ├─ Total Raw: 16TB
+   ├─ Usable Storage: 8TB (50%)
+   ├─ Protection: 1 drive per mirror can fail (2 total) ✓
+   ├─ Read Speed: FAST (reads from 4 drives)
+   ├─ Write Speed: FAST (writes in parallel)
+   └─ Best For: Databases, VMs, high performance needs
+   
+   Math: 16TB raw ÷ 2 (mirroring) = 8TB usable
+   ```
+   
+   **Option C: RAID-Z1 (ZFS equivalent to RAID-5)** ⭐⭐ Recommended for 4 drives
+   ```
+   Configuration: 3 data blocks + 1 parity block per stripe
+   ├─ Drive 1: Mix of data + parity
+   ├─ Drive 2: Mix of data + parity  
+   ├─ Drive 3: Mix of data + parity
+   ├─ Drive 4: Mix of data + parity
+   ├─ Total Raw: 16TB
+   ├─ Usable Storage: 12TB (75%)
+   ├─ Protection: 1 drive can fail, rebuild from parity ✓
+   ├─ Read Speed: Good (reads across 4 drives)
+   ├─ Write Speed: Moderate (must calculate parity)
+   └─ Best For: General home NAS, best balance of space/safety
+   
+   Math: 16TB raw - 4TB parity = 12TB usable
+   Why 75%? = 3 drives store data, 1 drive worth stores parity
+   ```
+   
+   **Option D: RAID-Z2 (ZFS equivalent to RAID-6)**
+   ```
+   Configuration: 2 data blocks + 2 parity blocks per stripe
+   ├─ Drive 1: Mix of data + parity
+   ├─ Drive 2: Mix of data + parity  
+   ├─ Drive 3: Mix of data + parity
+   ├─ Drive 4: Mix of data + parity
+   ├─ Total Raw: 16TB
+   ├─ Usable Storage: 8TB (50%)
+   ├─ Protection: 2 drives can fail simultaneously ✓✓
+   ├─ Read Speed: Good
+   ├─ Write Speed: Slower (more parity calculations)
+   └─ Best For: Critical data, paranoid about failures
+   
+   Math: 16TB raw - 8TB parity = 8TB usable
+   Why 50%? = 2 drives store data, 2 drives worth store parity
+   ```
+   
+   ---
+   
+   ### Example 3: 6 Drives (6x 4TB = 24TB Raw)
+   
+   **Option A: RAID-Z2** ⭐⭐ Best for 6 drives
+   ```
+   Configuration: 4 data + 2 parity per stripe
+   ├─ Total Raw: 24TB
+   ├─ Usable Storage: 16TB (67%)
+   ├─ Protection: 2 drives can fail ✓✓
+   └─ Best For: Large media libraries, important data
+   
+   Math: 24TB raw - 8TB parity (2 drives) = 16TB usable
+   ```
+   
+   **Option B: RAID-Z3**
+   ```
+   Configuration: 3 data + 3 parity per stripe
+   ├─ Total Raw: 24TB
+   ├─ Usable Storage: 12TB (50%)
+   ├─ Protection: 3 drives can fail ✓✓✓
+   └─ Best For: Mission-critical data (usually overkill for home)
+   
+   Math: 24TB raw - 12TB parity (3 drives) = 12TB usable
+   ```
+   
+   ---
+   
+   ### Quick Reference Table
+   
+   | Drives | Config | Raw | Usable | % | Failures | Speed | Best For |
+   |--------|--------|-----|--------|---|----------|-------|----------|
+   | 2x 4TB | Mirror | 8TB | 4TB | 50% | 1 | Good | Simple NAS |
+   | 4x 4TB | Mirror | 16TB | 8TB | 50% | 2 | Fast | Performance |
+   | 4x 4TB | RAID-Z1 | 16TB | 12TB | 75% | 1 | Good | **Best balance** |
+   | 4x 4TB | RAID-Z2 | 16TB | 8TB | 50% | 2 | OK | Extra safety |
+   | 6x 4TB | RAID-Z2 | 24TB | 16TB | 67% | 2 | Good | **Large arrays** |
+   | 6x 4TB | RAID-Z3 | 24TB | 12TB | 50% | 3 | OK | Paranoid |
+   
+   ---
+   
+   ### Choosing the Right Configuration
+   
+   **For your setup (4x 4TB drives):**
+   
+   ```
+   ⭐ RECOMMENDED: RAID-Z1
+   └─ You get: 12TB usable (75% efficiency)
+   └─ Safety: Survives 1 drive failure
+   └─ Speed: Good for most use cases
+   └─ Perfect for: Home media server, file storage
+   
+   Consider RAID-Z2 if:
+   └─ You have irreplaceable data (family photos, work)
+   └─ Can't afford ANY data loss
+   └─ Trade-off: Only 8TB usable (50% efficiency)
+   
+   Consider Mirrors if:
+   └─ You need maximum write performance
+   └─ Running VMs or databases
+   └─ Trade-off: Only 8TB usable (50% efficiency)
+   ```
+   
+   ---
+   
+   **For 4 drives in TrueNAS (selecting RAID-Z1 layout)**:
    ```
    Available Disks:
    ├─ da2: 4.0 TB
@@ -408,12 +784,7 @@ Pool (tank)                    ← Top-level storage container
    ├─ da4: 4.0 TB
    └─ da5: 4.0 TB
    
-   Layout Options:
-   ├─ Stripe (RAID-0)    - No redundancy ❌
-   ├─ Mirror (RAID-1)    - 50% usable ✓
-   ├─ RAID-Z1            - 75% usable ✓✓ (Recommended)
-   ├─ RAID-Z2            - 50% usable (needs 4+ drives)
-   └─ RAID-Z3            - 25% usable (needs 5+ drives)
+   Selected Layout: RAID-Z1
    ```
 
 4. **Drag disks** to Data VDevs area:
