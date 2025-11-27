@@ -269,33 +269,322 @@ Version: [latest stable - auto-selected]
 ```
 
 #### Nextcloud Configuration
+
+This section configures Nextcloud application settings and includes both the app configuration AND database settings.
+
+##### Basic Settings
+
+**1. Timezone** *
 ```
-Nextcloud Settings:
-├─ Admin Username: admin
-├─ Admin Password: [strong password - SAVE THIS!]
-├─ Admin Email: admin@yourdomain.com
-└─ Nextcloud Host: 192.168.1.10 (your TrueNAS IP)
-   (or cloud.yourdomain.com if you have a domain)
-
-Timezone: America/New_York (or your timezone)
+Value: America/Los_Angeles (or your timezone)
+Purpose: Sets server timezone for logs, scheduled tasks, timestamps
+Options: Select from dropdown (America/New_York, Europe/London, Asia/Tokyo, etc.)
+Required: Yes
 ```
 
-**Important - Host Field**:
-- Enter your TrueNAS IP address (e.g., `192.168.1.10`)
-- This sets the trusted domain for Nextcloud
-- You can add more domains later in Nextcloud config
-- If using remote access, enter your domain name
-
-#### Database Configuration
+**2. Postgres Image (CAUTION)** *
 ```
-Database Type: PostgreSQL (recommended)
+Value: Postgres 17 (default, recommended)
+Purpose: PostgreSQL database version for Nextcloud
+Options: Postgres 15, 16, 17
+Recommendation: Use latest (17) unless you have specific compatibility needs
+⚠️ CAUTION: Cannot easily downgrade after installation
+Required: Yes
+```
 
-PostgreSQL Settings:
-├─ Enable: ✓
-├─ Database Name: nextcloud
-├─ Database User: nextcloud
-├─ Database Password: [auto-generated or custom]
-└─ Host: localhost (app manages it)
+##### Admin Account Settings
+
+**3. Admin User** *
+```
+Value: nextadmin (or your choice)
+Purpose: Primary administrator username for Nextcloud
+Default: admin
+Recommendation: Use a unique name (not "admin") for security
+Examples: nextadmin, cloudadmin, your-name
+Required: Yes
+Min Length: 1 character
+```
+
+**4. Admin Password** *
+```
+Value: [strong password - SAVE THIS!]
+Purpose: Administrator account password
+Requirements:
+├─ Minimum 8 characters (recommended 12+)
+├─ Mix of letters, numbers, symbols
+└─ No spaces
+Security Tip: Use password manager to generate/store
+Required: Yes
+```
+
+##### APT Packages (Optional)
+```
+Purpose: Install additional Ubuntu packages inside container
+Use Cases:
+├─ Custom tools (imagemagick, ffmpeg)
+├─ Additional PHP extensions
+└─ System utilities
+Default: Empty (not needed for basic setup)
+Add: Click "Add" button, enter package name
+Examples: imagemagick, ffmpeg, smbclient
+Required: No
+```
+
+---
+
+#### Imaginary Configuration (Image Processing)
+
+**Imaginary** is an optional HTTP service for image resizing/processing.
+
+**5. Imaginary - Enabled**
+```
+Value: ☐ Unchecked (default)
+Purpose: Enable fast image thumbnail generation
+When to enable:
+├─ Large photo collections
+├─ Need faster preview generation
+└─ Have CPU resources to spare
+Performance: Faster than PHP-based processing
+Resource Cost: +256MB RAM, +0.5 CPU core
+Recommendation: Leave disabled initially, enable later if needed
+Required: No
+```
+
+---
+
+#### Host Configuration (Trusted Domain)
+
+**6. Host** (Critical - This caused your red warning!)
+```
+Value: 192.168.3.138 (YOUR TrueNAS IP)
+
+Purpose: Sets the "trusted domain" for Nextcloud
+├─ Nextcloud only accepts connections from listed domains/IPs
+├─ Prevents DNS rebinding attacks
+└─ Can add more domains later in config
+
+What to Enter:
+├─ Option 1: TrueNAS IP → 192.168.3.138
+├─ Option 2: Local hostname → truenas.home.local
+├─ Option 3: Domain name → cloud.yourdomain.com
+└─ Option 4: All of above (space-separated)
+
+⚠️ IMPORTANT:
+├─ Do NOT include "http://" or "https://"
+├─ Do NOT include port numbers
+├─ Just IP address or domain name
+└─ Can be changed later in Nextcloud config
+
+Examples:
+├─ ✓ Good: 192.168.3.138
+├─ ✓ Good: cloud.example.com
+├─ ✓ Good: 192.168.3.138 cloud.example.com
+├─ ✗ Bad: http://192.168.3.138
+├─ ✗ Bad: 192.168.3.138:9000
+└─ ✗ Bad: https://cloud.example.com
+
+Required: Yes (this is why you had the red warning!)
+```
+
+---
+
+#### Storage Paths (Internal Container Paths)
+
+**7. Data Directory Path** *
+```
+Value: /var/www/html/data (default - DO NOT CHANGE)
+Purpose: Internal path where Nextcloud stores user files
+Located: Inside the container
+Mapped to: Your ixVolume or host path dataset
+Why not change: Nextcloud expects this exact path
+Required: Yes
+Leave as: /var/www/html/data
+```
+
+---
+
+#### Redis Configuration (Caching & Performance)
+
+**Redis** = In-memory cache for faster performance
+
+**8. Redis Password** *
+```
+Value: phetphoongthai (or generate secure password)
+Purpose: Password for Redis cache server
+Security: Prevents unauthorized cache access
+Requirements:
+├─ Minimum 8 characters
+├─ Use strong password
+└─ Different from admin password (optional but recommended)
+Auto-generated: TrueNAS can generate one
+Recommendation: Use password manager
+Required: Yes
+```
+
+---
+
+#### PostgreSQL Database Configuration
+
+**PostgreSQL** = Main database storing Nextcloud metadata
+
+**9. Database Password** *
+```
+Value: phetphoongthai (or generate secure password)
+Purpose: Password for PostgreSQL database user
+Security: Protects database from unauthorized access
+Requirements:
+├─ Minimum 8 characters
+├─ Use strong password
+└─ Can be same as Redis password (simpler) or different (more secure)
+
+⚠️ Database vs Redis Password:
+├─ DATABASE Password: Protects your data (files metadata, users, settings)
+├─ REDIS Password: Protects cache (temporary performance data)
+└─ Can be same or different (your choice)
+
+Recommendation:
+├─ For home use: Can use same password (simpler)
+└─ For production: Use different passwords (more secure)
+
+Auto-generated: TrueNAS can generate strong password
+Required: Yes
+```
+
+**The Difference: Redis Password vs Database Password**
+
+| Field | Purpose | Protects | Importance |
+|-------|---------|----------|------------|
+| **Database Password** | PostgreSQL database | User data, files metadata, settings, shares | CRITICAL - contains all your data |
+| **Redis Password** | In-memory cache | Temporary cached data, session info | IMPORTANT - for performance |
+
+```
+Think of it like this:
+├─ Database = Your filing cabinet (permanent storage)
+└─ Redis = Your desk (quick access workspace)
+
+Both need locks (passwords), but losing the filing cabinet is worse!
+```
+
+---
+
+#### PHP Configuration Limits
+
+**10. PHP Upload Limit (in GB)** *
+```
+Value: 3 (default)
+Purpose: Maximum file size users can upload via web interface
+Unit: Gigabytes (GB)
+Default: 3 GB (3000 MB)
+Recommendations:
+├─ Home use: 5-10 GB (for large videos)
+├─ Office use: 2-5 GB (documents, photos)
+├─ Public sharing: 1-2 GB (security consideration)
+└─ Mobile uploads: 3-5 GB (4K videos)
+
+Examples:
+├─ 1 GB = Max 1 GB file (like 30 min 4K video)
+├─ 3 GB = Max 3 GB file (like 90 min 4K video)
+└─ 10 GB = Max 10 GB file (like full movie or large backup)
+
+⚠️ Note: Larger limits use more RAM during upload
+Impact: 3 GB upload ≈ 1 GB RAM usage
+Required: Yes
+```
+
+**11. Max Execution Time (in seconds)** *
+```
+Value: 30 (default)
+Purpose: Maximum time PHP script can run before timeout
+Unit: Seconds
+Default: 30 seconds
+Use Cases:
+├─ 30s: Normal web requests (viewing files, navigation)
+├─ 60s: Generating large thumbnails
+├─ 300s: Large file operations, migrations
+└─ 3600s: Massive batch operations (not common)
+
+When to increase:
+├─ Users get "timeout" errors during uploads
+├─ Large file preview generation fails
+└─ Background tasks don't complete
+
+Recommendations:
+├─ Small files (<1GB): 30-60 seconds
+├─ Large files (1-5GB): 300 seconds
+└─ Very large files (5GB+): 600-3600 seconds
+
+⚠️ Too high = hung scripts can consume resources
+Required: Yes
+```
+
+**12. PHP Memory Limit (in MB)** *
+```
+Value: 512 (default, recommended 512-1024)
+Purpose: Maximum RAM a single PHP process can use
+Unit: Megabytes (MB)
+Default: 512 MB
+Recommendations:
+├─ Small installation (<10 users): 512 MB
+├─ Medium installation (10-50 users): 1024 MB (1 GB)
+├─ Large installation (50+ users): 2048 MB (2 GB)
+└─ With many apps/plugins: 1024-2048 MB
+
+Use Cases:
+├─ 512 MB: Basic file operations, small thumbnails
+├─ 1024 MB: Large image processing, document previews
+└─ 2048 MB: Video thumbnail generation, bulk operations
+
+When to increase:
+├─ "Memory exhausted" errors in logs
+├─ Large file uploads fail
+├─ Image preview generation fails
+└─ Apps crash during heavy operations
+
+⚠️ Total RAM usage = PHP Memory × Concurrent Users
+Example: 512 MB × 10 users = 5 GB RAM needed
+Required: Yes
+```
+
+---
+
+### Field Summary Table
+
+| Field | Required | Default | Purpose | When to Change |
+|-------|----------|---------|---------|----------------|
+| **Timezone** | Yes | America/Los_Angeles | Server time | Match your location |
+| **Postgres Image** | Yes | 17 | Database version | Never (use latest) |
+| **Admin User** | Yes | admin | Administrator account | Always (security) |
+| **Admin Password** | Yes | - | Admin login | Always (required) |
+| **APT Packages** | No | Empty | Extra software | Rarely (advanced) |
+| **Imaginary Enabled** | No | Unchecked | Fast image processing | If needed later |
+| **Host** | Yes | - | Trusted domain | Always (required) |
+| **Data Directory** | Yes | /var/www/html/data | Storage path | Never |
+| **Redis Password** | Yes | - | Cache security | Always (required) |
+| **Database Password** | Yes | - | Database security | Always (required) |
+| **PHP Upload Limit** | Yes | 3 GB | Max file size | If uploading large files |
+| **Max Execution Time** | Yes | 30 sec | Script timeout | If seeing timeouts |
+| **PHP Memory Limit** | Yes | 512 MB | RAM per process | If seeing memory errors |
+
+---
+
+### Quick Start Values (Copy-Paste Ready)
+
+```
+For your installation (192.168.3.138):
+
+Timezone: America/Los_Angeles (or your timezone)
+Postgres Image: Postgres 17
+Admin User: nextadmin
+Admin Password: [generate strong password]
+APT Packages: [leave empty]
+Imaginary: ☐ Unchecked
+Host: 192.168.3.138
+Data Directory Path: /var/www/html/data
+Redis Password: [generate strong password]
+Database Password: [same or different password]
+PHP Upload Limit: 5 GB
+Max Execution Time: 300 seconds
+PHP Memory Limit: 1024 MB
 ```
 
 #### Storage Configuration (Modern TrueCharts Version)
@@ -968,7 +1257,61 @@ chmod +x /mnt/tank/scripts/backup-nextcloud-db.sh
 
 ## Troubleshooting
 
-### Issue 1: Can't Access Nextcloud
+### Issue 1: Web UI Redirects to TrueNAS Dashboard
+
+**Symptoms**: 
+- Nextcloud is deployed and shows "Running" status
+- Clicking "Web UI" button redirects to TrueNAS dashboard instead of Nextcloud
+- Browser URL shows TrueNAS IP (192.168.3.138) without port number
+
+**Root Cause**: 
+The **Host** field in Nextcloud Configuration was set to the same IP as TrueNAS (e.g., `192.168.3.138`), causing a conflict. Nextcloud uses this field as its "trusted domain" and gets confused when it matches the TrueNAS management interface.
+
+**Solution**:
+
+**Option 1: Use IP with Port (Quickest Fix)**
+1. In TrueNAS, go to **Applications**
+2. Click **Edit** on the nextcloud application
+3. Find **Nextcloud Configuration** → **Host** field
+4. Check what port was auto-assigned (shown in the application list or Web UI button)
+5. Change Host from `192.168.3.138` to `192.168.3.138:XXXXX` (use your actual port, typically 30000-32767)
+   - Example: `192.168.3.138:30080`
+6. Click **Save** and wait 2-3 minutes for redeployment
+7. Click **Web UI** again - should now load Nextcloud
+
+**Option 2: Use Local Domain Name (Better for home network)**
+1. Set Host to: `nextcloud.local` or `nextcloud.home`
+2. Edit your computer's hosts file:
+   - **Mac/Linux**: `sudo nano /etc/hosts`
+   - **Windows**: Edit `C:\Windows\System32\drivers\etc\hosts` as Administrator
+3. Add line: `192.168.3.138 nextcloud.local`
+4. Save and access via `http://nextcloud.local:PORT`
+
+**Option 3: Use Proper Domain (Production setup)**
+1. Own a domain name (e.g., `yourdomain.com`)
+2. Set Host to: `nextcloud.yourdomain.com`
+3. Configure DNS A record pointing to your public IP
+4. Set up port forwarding on router
+5. Configure reverse proxy (Traefik/Nginx) for HTTPS
+6. Install SSL certificate
+
+**Why This Happens**:
+- TrueNAS management interface runs on port 443/80
+- Nextcloud runs on a random high port (30000+)
+- When Host matches TrueNAS IP exactly, Nextcloud doesn't know its own unique address
+- Browser connects to port 443 by default → lands on TrueNAS instead of Nextcloud's port
+
+**Verification After Fix**:
+```
+✅ Web UI button loads Nextcloud login page (not TrueNAS)
+✅ URL shows correct port: http://192.168.3.138:30080
+✅ No "Not Secure" warnings (expected for HTTP on local network)
+✅ Nextcloud logo and login form visible
+```
+
+---
+
+### Issue 2: Can't Access Nextcloud
 
 **Symptoms**: Browser shows "connection refused" or timeout
 
