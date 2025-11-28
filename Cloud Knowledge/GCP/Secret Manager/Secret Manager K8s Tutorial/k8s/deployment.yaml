@@ -1,0 +1,267 @@
+# Complete Deployment example showing secret mounting with CSI driver
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  namespace: default
+  labels:
+    app: demo-app
+    version: v1.0.0
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: demo-app
+
+  # Rolling update strategy for zero-downtime secret rotation
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  template:
+    metadata:
+      labels:
+        app: demo-app
+        version: v1.0.0
+    spec:
+      # CRITICAL: Use ServiceAccount with Workload Identity annotation
+      serviceAccountName: demo-app-ksa
+
+      # Security context for the pod
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      containers:
+      - name: app
+        image: gcr.io/my-project-dev/demo-app:latest
+        imagePullPolicy: Always
+
+        # Environment variables pointing to mounted secrets
+        env:
+        # Google Cloud client libraries automatically use this
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /var/secrets/credentials.json
+
+        # Application-specific configuration
+        - name: API_KEY_FILE
+          value: /var/secrets/api-key.txt
+
+        - name: DATABASE_URL_FILE
+          value: /var/secrets/database-url.txt
+
+        # Application port
+        - name: PORT
+          value: "8080"
+
+        # Container security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+        # Resource limits
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+        # Volume mounts for secrets
+        volumeMounts:
+        # Mount CSI driver volume containing secrets
+        - name: secrets
+          mountPath: /var/secrets
+          readOnly: true  # IMPORTANT: Secrets should be read-only
+
+        # Writable temp directory (needed if using readOnlyRootFilesystem)
+        - name: tmp
+          mountPath: /tmp
+
+      volumes:
+      # CSI driver volume - references SecretProviderClass
+      - name: secrets
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: demo-app-secrets  # Must exist in same namespace
+
+      # Writable temp volume
+      - name: tmp
+        emptyDir: {}
+
+---
+# Alternative: Multiple SecretProviderClasses in one pod
+# Use when different secrets have different access patterns
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app-multi-secrets
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-app-multi
+  template:
+    metadata:
+      labels:
+        app: demo-app-multi
+    spec:
+      serviceAccountName: demo-app-ksa
+      containers:
+      - name: app
+        image: gcr.io/my-project-dev/demo-app:latest
+        env:
+        - name: STORAGE_CREDENTIALS
+          value: /var/secrets/storage/credentials.json
+        - name: API_KEY_FILE
+          value: /var/secrets/api/api-key.txt
+
+        volumeMounts:
+        # Mount storage secrets
+        - name: storage-secrets
+          mountPath: /var/secrets/storage
+          readOnly: true
+
+        # Mount API secrets
+        - name: api-secrets
+          mountPath: /var/secrets/api
+          readOnly: true
+
+      volumes:
+      - name: storage-secrets
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: demo-app-storage-secrets
+
+      - name: api-secrets
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: demo-app-api-secrets
+
+---
+# Example: Using synced Kubernetes Secret for environment variables
+# Only use when file-based access is not possible
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app-env-vars
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-app-env
+  template:
+    metadata:
+      labels:
+        app: demo-app-env
+    spec:
+      serviceAccountName: demo-app-ksa
+      containers:
+      - name: app
+        image: gcr.io/my-project-dev/demo-app:latest
+
+        env:
+        # Load from synced Kubernetes Secret (created by SecretProviderClass)
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: demo-app-secret  # Created by secretObjects in SecretProviderClass
+              key: api-key
+
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: demo-app-secret
+              key: db-url
+
+        volumeMounts:
+        # Still need to mount CSI volume for sync to happen
+        - name: secrets
+          mountPath: /var/secrets
+          readOnly: true
+
+      volumes:
+      - name: secrets
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: demo-app-secrets  # Must have secretObjects defined
+
+---
+# CronJob example: Batch job accessing secrets
+# Useful for scheduled tasks that need credentials
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: demo-app-backup
+  namespace: default
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: demo-app-ksa
+          restartPolicy: OnFailure
+
+          containers:
+          - name: backup
+            image: gcr.io/my-project-dev/demo-app-backup:latest
+            env:
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /var/secrets/credentials.json
+            - name: BACKUP_BUCKET
+              value: gs://demo-bucket/backups
+
+            volumeMounts:
+            - name: secrets
+              mountPath: /var/secrets
+              readOnly: true
+
+          volumes:
+          - name: secrets
+            csi:
+              driver: secrets-store.csi.k8s.io
+              readOnly: true
+              volumeAttributes:
+                secretProviderClass: demo-app-secrets
